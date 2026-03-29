@@ -1,0 +1,112 @@
+﻿#Requires AutoHotkey v2.0
+#SingleInstance Force
+
+; ==============================================================================
+; CONFIGURATION
+; ==============================================================================
+dimPercent   := 99    ; How dark to make the screen (0 = invisible, 100 = pitch black)
+fadeDuration := 200  ; Time in milliseconds for the fade to complete (1000 = 1 sec)
+hotkeyTrigger := "^!d" ; The hotkey (Ctrl + Alt + D)
+
+; ==============================================================================
+; SCRIPT LOGIC (Do not edit below unless you know what you are doing)
+; ==============================================================================
+
+; Ensure mouse coordinates are always absolute screen positions
+CoordMode "Mouse", "Screen"
+
+; Calculate internal values
+maxAlpha := Floor(dimPercent * 2.55) ; Convert % to 0-255 range
+animTick := 20                       ; Update animation every 20ms (50 FPS)
+stepSize := maxAlpha / (fadeDuration / animTick) ; Calculate alpha change per tick
+
+dim := false
+overlays := Map()  ; Stores objects {gui: GuiObj, currentAlpha: 0-255, targetAlpha: 0-255}
+
+; Register the Hotkey dynamically
+Hotkey hotkeyTrigger, ToggleDim
+
+ToggleDim(*)
+{
+    global dim, overlays, fadeDuration
+    dim := !dim
+
+    if dim {
+        monitorCount := MonitorGetCount()
+        primary := MonitorGetPrimary()
+
+        Loop monitorCount {
+            if (A_Index = primary)
+                continue
+
+            MonitorGet(A_Index, &L, &T, &R, &B)
+
+            g := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x20")
+            g.BackColor := "Black"
+
+            ; Start fully transparent (Alpha 0) so we can fade in
+            currentAlpha := 0
+            WinSetTransparent(currentAlpha, g.Hwnd)
+
+            g.Show("x" L " y" T " w" (R-L) " h" (B-T) " NoActivate")
+
+            ; Initialize tracking object for this monitor
+            overlays[A_Index] := {gui: g, currentAlpha: 0, targetAlpha: maxAlpha}
+        }
+
+        ; Timer 1: Checks mouse position (Logic)
+        SetTimer CheckMouse, 100
+
+        ; Timer 2: Handles animation (Visuals)
+        SetTimer UpdateFade, animTick
+
+    } else {
+        Sleep fadeDuration
+        SetTimer CheckMouse, 0
+        SetTimer UpdateFade, 0
+        for idx, obj in overlays
+            obj.gui.Destroy()
+        overlays.Clear()
+    }
+}
+
+CheckMouse() {
+    global overlays, maxAlpha
+    if !overlays.Count
+        return
+
+    MouseGetPos(&mx, &my)
+
+    for monIndex, obj in overlays {
+        MonitorGet(monIndex, &L, &T, &R, &B)
+
+        ; Check if Mouse is inside this monitor
+        if (mx >= L && mx < R && my >= T && my < B) {
+            obj.targetAlpha := 0        ; Target: Invisible (Undimmed)
+        } else {
+            obj.targetAlpha := maxAlpha ; Target: Dark (Dimmed)
+        }
+    }
+}
+
+UpdateFade() {
+    global dim, overlays, stepSize
+    if !overlays.Count
+        return
+
+    for monIndex, obj in overlays {
+        if dim {
+            targetAlpha := obj.targetAlpha
+        } else {
+            targetAlpha := 0
+        }
+        if (obj.currentAlpha != targetAlpha) {
+            if (obj.currentAlpha < targetAlpha) {
+                obj.currentAlpha := Min(targetAlpha, obj.currentAlpha + stepSize)
+            } else {
+                obj.currentAlpha := Max(targetAlpha, obj.currentAlpha - stepSize)
+            }
+            try WinSetTransparent(Floor(obj.currentAlpha), obj.gui.Hwnd)
+        }
+    }
+}
