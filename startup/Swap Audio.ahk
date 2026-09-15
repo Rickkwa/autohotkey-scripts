@@ -13,17 +13,25 @@
 ; Ctrl+Alt+Left / Right
 ;   Browse through available playback devices.
 ;
-;   While Ctrl+Alt is held:
-;       Previous
-;       CURRENT
-;       Next
+; Ctrl+Alt+Up / Down
+;   While browsing, change the selected device's volume.
+;
+;   The first Left/Right/Up/Down press only opens the browser.
+;   Subsequent presses perform the requested action.
 ;
 ;   The audio device is NOT changed while browsing.
+;   Volume changes are applied immediately.
 ;
 ;   When Ctrl+Alt is released:
 ;       The selected device becomes the default.
 ;
 ; ============================================================
+
+; ============================================================
+; Configuration
+; ============================================================
+
+global VOLUME_INCREMENT := 2
 
 
 ; ============================================================
@@ -40,9 +48,11 @@ global gBrowsing := false
 global gBrowseApplied := false
 
 global gBrowseGui := 0
+global gPrev2Text := 0
 global gPrevText := 0
 global gCurrentText := 0
 global gNextText := 0
+global gNext2Text := 0
 
 global gNotificationGui := 0
 global gNotificationText := 0
@@ -134,10 +144,14 @@ ToggleLastDevice()
     if !targetName
         targetName := "Unknown Device"
 
-    ; Switch and update history.
+    ; Get the volume of the device we are about to switch to.
+    targetVolume := GetDeviceVolume(targetId)
+
     if SwitchToDevice(targetId)
     {
-        ShowNotification(targetName)
+        ShowNotification(
+            FormatDeviceDisplay(targetName, targetVolume)
+        )
     }
     else
     {
@@ -252,6 +266,30 @@ SwitchToDevice(deviceId)
 
 
 ; ============================================================
+; Ctrl+Alt+Up
+;
+; Change volume of the currently selected device.
+; ============================================================
+
+^!Up::
+{
+    BeginOrContinueVolumeBrowsing(1)
+}
+
+
+; ============================================================
+; Ctrl+Alt+Down
+;
+; Change volume of the currently selected device.
+; ============================================================
+
+^!Down::
+{
+    BeginOrContinueVolumeBrowsing(-1)
+}
+
+
+; ============================================================
 ; Begin / continue browsing
 ; ============================================================
 
@@ -303,12 +341,8 @@ BeginOrContinueBrowsing(direction)
         gBrowsing := true
         gBrowseApplied := false
 
-        ; IMPORTANT:
-        ; Do NOT modify gSelectedIndex here.
-        ;
         ; The first Left/Right press only opens the selector
         ; and displays the current device in the middle.
-
         ShowBrowseGui()
         return
     }
@@ -326,6 +360,72 @@ BeginOrContinueBrowsing(direction)
     )
 
     UpdateBrowseGui()
+}
+
+
+; ============================================================
+; Begin / continue volume browsing
+;
+; The first Up/Down press only opens the browser.
+; Subsequent presses change the selected device volume
+; immediately by VOLUME_INCREMENT percentage points.
+; ============================================================
+
+BeginOrContinueVolumeBrowsing(direction)
+{
+    global gDevices
+    global gSelectedIndex
+    global gBrowsing
+    global gBrowseApplied
+    global gCurrentDeviceId
+    global VOLUME_INCREMENT
+
+    ; First Up/Down press only opens the selector.
+    if !gBrowsing
+    {
+        gDevices := GetPlaybackDevices()
+
+        if gDevices.Length < 2
+        {
+            ShowNotification("Need at least two playback devices.")
+            return
+        }
+
+        gCurrentDeviceId := GetDefaultPlaybackDeviceId()
+
+        if !gCurrentDeviceId
+        {
+            ShowNotification("Could not determine current device.")
+            return
+        }
+
+        gSelectedIndex := FindDeviceIndex(
+            gDevices,
+            gCurrentDeviceId
+        )
+
+        if !gSelectedIndex
+        {
+            ShowNotification("Current device was not found.")
+            return
+        }
+
+        gBrowsing := true
+        gBrowseApplied := false
+
+        ShowBrowseGui()
+        return
+    }
+
+    device := gDevices[gSelectedIndex]
+
+    if ChangeDeviceVolume(
+        device.id,
+        direction * VOLUME_INCREMENT
+    )
+    {
+        UpdateBrowseGui()
+    }
 }
 
 
@@ -379,10 +479,20 @@ TryApplySelection()
 
     device := gDevices[gSelectedIndex]
 
+    ; Refresh the volume one last time so the notification
+    ; reflects any changes made immediately before release.
+    device.volume := GetDeviceVolume(device.id)
+
     if SwitchToDevice(device.id)
     {
         HideBrowseGui()
-        ShowNotification(device.name)
+
+        ShowNotification(
+            FormatDeviceDisplay(
+                device.name,
+                device.volume
+            )
+        )
     }
     else
     {
@@ -393,6 +503,10 @@ TryApplySelection()
     ResetBrowsing()
 }
 
+
+; ============================================================
+; Reset browsing state
+; ============================================================
 
 ResetBrowsing()
 {
@@ -496,9 +610,12 @@ GetPlaybackDevices()
         if !deviceName
             deviceName := "Unknown Device"
 
+        deviceVolume := GetDeviceVolume(deviceId)
+
         devices.Push({
             id: deviceId,
-            name: deviceName
+            name: deviceName,
+            volume: deviceVolume
         })
     }
 
@@ -768,6 +885,191 @@ CycleIndex(index, direction, count)
 
 
 ; ============================================================
+; Get IAudioEndpointVolume interface for a device
+;
+; IAudioEndpointVolume IID:
+; {5CDF2C82-841E-4546-9722-0CF74078229A}
+; ============================================================
+
+GetEndpointVolume(deviceId)
+{
+    if !deviceId
+        return 0
+
+    try
+    {
+        enumerator := ComObject(
+            "{BCDE0395-E52F-467C-8E3D-C4579291692E}",
+            "{A95664D2-9614-4F35-A746-DE8DB63617E6}"
+        )
+
+        devicePtr := 0
+
+        ; IMMDeviceEnumerator::GetDevice
+        hr := ComCall(
+            5,
+            enumerator,
+            "Str",
+            deviceId,
+            "Ptr*",
+            &devicePtr,
+            "HRESULT"
+        )
+
+        if hr != 0 || !devicePtr
+            return 0
+
+        device := ComValue(13, devicePtr)
+
+        iid := Buffer(16, 0)
+
+        DllCall(
+            "Ole32\CLSIDFromString",
+            "Str",
+            "{5CDF2C82-841E-4546-9722-0CF74078229A}",
+            "Ptr",
+            iid,
+            "HRESULT"
+        )
+
+        endpointPtr := 0
+
+        ; IMMDevice::Activate
+        ;
+        ; CLSCTX_ALL = 23
+        hr := ComCall(
+            3,
+            device,
+            "Ptr",
+            iid,
+            "UInt",
+            23,
+            "Ptr",
+            0,
+            "Ptr*",
+            &endpointPtr,
+            "HRESULT"
+        )
+
+        if hr != 0 || !endpointPtr
+            return 0
+
+        return ComValue(13, endpointPtr)
+    }
+    catch
+    {
+        return 0
+    }
+}
+
+
+; ============================================================
+; Get device master volume as an integer percentage
+;
+; IAudioEndpointVolume::GetMasterVolumeLevelScalar
+; vtable index = 9
+; ============================================================
+
+GetDeviceVolume(deviceId)
+{
+    endpoint := GetEndpointVolume(deviceId)
+
+    if !endpoint
+        return -1
+
+    volume := 0.0
+
+    hr := ComCall(
+        9,
+        endpoint,
+        "Float*",
+        &volume,
+        "HRESULT"
+    )
+
+    if hr != 0
+        return -1
+
+    return Round(volume * 100)
+}
+
+
+; ============================================================
+; Change device master volume
+;
+; delta is in percentage points.
+;
+; Example:
+;   +2 = increase from 40% to 42%
+;   -2 = decrease from 40% to 38%
+; ============================================================
+
+ChangeDeviceVolume(deviceId, delta)
+{
+    endpoint := GetEndpointVolume(deviceId)
+
+    if !endpoint
+        return false
+
+    volume := 0.0
+
+    ; IAudioEndpointVolume::GetMasterVolumeLevelScalar
+    hr := ComCall(
+        9,
+        endpoint,
+        "Float*",
+        &volume,
+        "HRESULT"
+    )
+
+    if hr != 0
+        return false
+
+    volume += delta / 100.0
+
+    ; Clamp to 0.0 - 1.0.
+    if volume < 0
+        volume := 0
+
+    if volume > 1
+        volume := 1
+
+    ; IAudioEndpointVolume::SetMasterVolumeLevelScalar
+    ; vtable index = 7
+    hr := ComCall(
+        7,
+        endpoint,
+        "Float",
+        volume,
+        "Ptr",
+        0,
+        "HRESULT"
+    )
+
+    return hr = 0
+}
+
+
+; ============================================================
+; Format a device name and volume for display
+;
+; Result:
+;   Headphones (42%)
+; ============================================================
+
+FormatDeviceDisplay(deviceName, volume)
+{
+    if volume < 0
+        volumeText := "?"
+
+    else
+        volumeText := volume "%"
+
+    return deviceName " (" volumeText ")"
+}
+
+
+; ============================================================
 ; Set Windows default audio endpoint
 ;
 ; Uses the undocumented IPolicyConfig COM interface.
@@ -853,7 +1155,7 @@ ShowBrowseGui()
     )
 
     gPrev2Text := gBrowseGui.AddText(
-        "w700 h28 Center c808080",
+        "w1000 h28 Center c808080",
         ""
     )
 
@@ -867,7 +1169,7 @@ ShowBrowseGui()
     )
 
     gPrevText := gBrowseGui.AddText(
-        "w700 h34 Center cB0B0B0",
+        "w1000 h34 Center cB0B0B0",
         ""
     )
 
@@ -881,7 +1183,7 @@ ShowBrowseGui()
     )
 
     gCurrentText := gBrowseGui.AddText(
-        "w700 h50 Center cFFFFFF",
+        "w1000 h50 Center cFFFFFF",
         ""
     )
 
@@ -895,7 +1197,7 @@ ShowBrowseGui()
     )
 
     gNextText := gBrowseGui.AddText(
-        "w700 h34 Center cB0B0B0",
+        "w1000 h34 Center cB0B0B0",
         ""
     )
 
@@ -909,7 +1211,7 @@ ShowBrowseGui()
     )
 
     gNext2Text := gBrowseGui.AddText(
-        "w700 h28 Center c808080",
+        "w1000 h28 Center c808080",
         ""
     )
 
@@ -924,21 +1226,32 @@ ShowBrowseGui()
 }
 
 
+; ============================================================
+; Update browse GUI
+;
+; Refreshes volumes for all visible devices so that volume
+; changes are immediately reflected on screen.
+; ============================================================
+
 UpdateBrowseGui()
 {
     global gDevices
     global gSelectedIndex
-
     global gPrev2Text
     global gPrevText
     global gCurrentText
     global gNextText
     global gNext2Text
+    global gBrowseGui
 
     if gDevices.Length = 0
         return
 
     count := gDevices.Length
+
+    ; Refresh the volume of every enumerated device.
+    for index, device in gDevices
+        device.volume := GetDeviceVolume(device.id)
 
     ; --------------------------------------------------------
     ; Calculate surrounding indices.
@@ -975,22 +1288,42 @@ UpdateBrowseGui()
     ; --------------------------------------------------------
 
     gPrev2Text.Text :=
-        "‹  " gDevices[prev2Index].name
+        "‹  " FormatDeviceDisplay(
+            gDevices[prev2Index].name,
+            gDevices[prev2Index].volume
+        )
 
     gPrevText.Text :=
-        "‹  " gDevices[prevIndex].name
+        "‹  " FormatDeviceDisplay(
+            gDevices[prevIndex].name,
+            gDevices[prevIndex].volume
+        )
 
     gCurrentText.Text :=
-        gDevices[gSelectedIndex].name
+        FormatDeviceDisplay(
+            gDevices[gSelectedIndex].name,
+            gDevices[gSelectedIndex].volume
+        )
 
     gNextText.Text :=
-        "›  " gDevices[nextIndex].name
+        "›  " FormatDeviceDisplay(
+            gDevices[nextIndex].name,
+            gDevices[nextIndex].volume
+        )
 
     gNext2Text.Text :=
-        "›  " gDevices[next2Index].name
+        "›  " FormatDeviceDisplay(
+            gDevices[next2Index].name,
+            gDevices[next2Index].volume
+        )
 
     ShowGuiBottomCenter(gBrowseGui)
 }
+
+
+; ============================================================
+; Hide browse GUI
+; ============================================================
 
 HideBrowseGui()
 {
@@ -1029,7 +1362,7 @@ ShowNotification(text)
     )
 
     gNotificationText := gNotificationGui.AddText(
-        "w700 Center cFFFFFF",
+        "w1000 Center cFFFFFF",
         text
     )
 
