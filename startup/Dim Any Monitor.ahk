@@ -45,7 +45,7 @@ RegisterHotkeys() {
     global monitorMap
 
     Loop monitorMap.Length {
-        key := "^!" . A_Index
+        key := "RWin & " . A_Index
         Hotkey key, ToggleMonitor.Bind(A_Index)
     }
 }

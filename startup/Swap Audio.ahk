@@ -7,13 +7,13 @@
 ;
 ; NO EXTERNAL LIBRARIES
 ;
-; Ctrl+Alt+A
+; RWin+A
 ;   Toggle between the current and LAST audio device.
 ;
-; Ctrl+Alt+Left / Right
+; RWin+Left / Right
 ;   Browse through available playback devices.
 ;
-; Ctrl+Alt+Up / Down
+; RWin+Up / Down
 ;   While browsing, change the selected device's volume.
 ;
 ;   The first Left/Right/Up/Down press only opens the browser.
@@ -22,7 +22,7 @@
 ;   The audio device is NOT changed while browsing.
 ;   Volume changes are applied immediately.
 ;
-;   When Ctrl+Alt is released:
+;   When RWin is released:
 ;       The selected device becomes the default.
 ;
 ; ============================================================
@@ -93,12 +93,11 @@ Initialize()
 
 
 ; ============================================================
-; Ctrl+Alt+A
+; RWin+A
 ;
 ; Toggle between CURRENT and LAST device.
 ; ============================================================
-
-^!a::
+RWin & a::
 {
     ToggleLastDevice()
 }
@@ -246,44 +245,44 @@ SwitchToDevice(deviceId)
 
 
 ; ============================================================
-; Ctrl+Alt+Left
+; RWin+Left
 ; ============================================================
 
-^!Left::
+RWin & Left::
 {
     BeginOrContinueBrowsing(-1)
 }
 
 
 ; ============================================================
-; Ctrl+Alt+Right
+; RWin+Right
 ; ============================================================
 
-^!Right::
+RWin & Right::
 {
     BeginOrContinueBrowsing(1)
 }
 
 
 ; ============================================================
-; Ctrl+Alt+Up
+; RWin+Up
 ;
 ; Change volume of the currently selected device.
 ; ============================================================
 
-^!Up::
+RWin & Up::
 {
     BeginOrContinueVolumeBrowsing(1)
 }
 
 
 ; ============================================================
-; Ctrl+Alt+Down
+; RWin+Down
 ;
 ; Change volume of the currently selected device.
 ; ============================================================
 
-^!Down::
+RWin & Down::
 {
     BeginOrContinueVolumeBrowsing(-1)
 }
@@ -430,20 +429,13 @@ BeginOrContinueVolumeBrowsing(direction)
 
 
 ; ============================================================
-; Ctrl/Alt release
+; RWin release
 ;
-; Apply the selected device only once both modifiers
-; have been released.
+; Apply the selected device only once the modifier
+; has been released.
 ; ============================================================
 
-~Ctrl Up::
-{
-    TryApplySelection()
-}
-
-
-~Alt Up::
-{
+~RWin Up:: {
     TryApplySelection()
 }
 
@@ -459,14 +451,6 @@ TryApplySelection()
         return
 
     if gBrowseApplied
-        return
-
-    ; If the other modifier is still held, wait for its
-    ; key-up event.
-    if GetKeyState("Ctrl", "P")
-        return
-
-    if GetKeyState("Alt", "P")
         return
 
     gBrowseApplied := true

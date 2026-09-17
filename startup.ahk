@@ -4,6 +4,7 @@
 startupDir := "C:\Users\ricky\Documents\AutoHotkey\startup"
 thisScript := A_ScriptFullPath
 
+
 Loop Files startupDir "\*.ahk" {
     ; Skip launching itself
     if (A_LoopFileFullPath = thisScript)
