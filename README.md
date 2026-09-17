@@ -2,9 +2,10 @@
 
 Set up a windows startup app to run `startup.ahk`.
 
+1. Update `startup.ahk` to set the `startupDir` to path to the `startup/` folder.
 1. Create a shortcut file of `startup.ahk`.
-2. Move that shortcut file into `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`
-3. Verify it shows up in Settings > Apps > Startup and is enabled
+1. Move that shortcut file into `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`
+1. Verify it shows up in Settings > Apps > Startup and is enabled
 
 # Scripts
 
