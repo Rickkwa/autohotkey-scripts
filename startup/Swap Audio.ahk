@@ -287,6 +287,15 @@ RWin & Down::
     BeginOrContinueVolumeBrowsing(-1)
 }
 
+; ============================================================
+; Cancel browsing with Escape
+; ============================================================
+
+RWin & Esc::
+{
+    CancelBrowsing()
+}
+
 
 ; ============================================================
 ; Begin / continue browsing
@@ -484,6 +493,22 @@ TryApplySelection()
         ShowNotification("Failed to switch audio device.")
     }
 
+    ResetBrowsing()
+}
+
+
+; ============================================================
+; Cancel browsing without applying the selection
+; ============================================================
+
+CancelBrowsing()
+{
+    global gBrowsing
+
+    if !gBrowsing
+        return
+
+    HideBrowseGui()
     ResetBrowsing()
 }
 
